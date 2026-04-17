@@ -1,5 +1,54 @@
 include:
   - project: 'QubesOS/qubes-continuous-integration'
-    file: '/r4.1/gitlab-base.yml'
+    file: '/r4.3/gitlab-base.yml'
   - project: 'QubesOS/qubes-continuous-integration'
-    file: '/r4.1/gitlab-vm.yml'
+    file: '/r4.3/gitlab-vm.yml'
+
+shellcheck:
+  image: fedora:latest
+  stage: checks
+  tags:
+    - docker
+  before_script:
+    - sudo dnf install -y ShellCheck git
+  script:
+    - shellcheck -x -e SC1117 $(grep -l '^#!/bin/\(ba\)\?sh' $(git ls-files))
+
+.bridge-device-integration:
+  stage: checks
+  tags:
+    - vm-kvm
+  variables:
+    TESTBED_REPO: https://github.com/fepitre/qubes-bridge-device-tests.git
+    TESTBED_DIR: /tmp/bridge-device-tests
+    ADMIN_SRC: /tmp/bridge-device-admin
+    ADMIN_REPO_URL: ""
+    ADMIN_BRANCH: ""
+  before_script:
+    - sudo qubes-dom0-update -y ansible qubes-ansible-dom0
+    - sudo qvm-run --pass-io -u root "$(qvm-prefs default-mgmt-dvm template)" "dnf install -y qubes-ansible qubes-ansible-vm"
+    - sudo qvm-shutdown --wait "$(qvm-prefs default-mgmt-dvm template)"
+  script:
+    - git clone --depth 1 "$TESTBED_REPO" "$TESTBED_DIR"
+    - |
+      ADMIN_REPO="${ADMIN_REPO_URL:-$CI_SERVER_URL/$CI_PROJECT_NAMESPACE/qubes-core-admin-addon-bridge-device.git}"
+      ADMIN_REF="${ADMIN_BRANCH:-$CI_COMMIT_BRANCH}"
+      git clone --branch "$ADMIN_REF" --depth 1 "$ADMIN_REPO" "$ADMIN_SRC"
+    - cd "$TESTBED_DIR"
+    - >
+      ansible-playbook playbooks/main.yml
+      -e core_admin_src="$ADMIN_SRC"
+      -e core_agent_src="$CI_PROJECT_DIR"
+    - >
+      ansible-playbook playbooks/deploy.yml
+      -e core_admin_src="$ADMIN_SRC"
+      -e core_agent_src="$CI_PROJECT_DIR"
+    - >
+      ansible-playbook playbooks/tests.yml
+      -e core_admin_src="$ADMIN_SRC"
+      -e core_agent_src="$CI_PROJECT_DIR"
+
+r4.3:bridge-device-integration:
+  extends: .bridge-device-integration
+  variables:
+    VM_IMAGE: qubes_4.3_64bit_stable.qcow2

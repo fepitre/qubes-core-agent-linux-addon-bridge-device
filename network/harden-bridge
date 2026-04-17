@@ -1,0 +1,81 @@
+#!/bin/bash
+# Apply security hardening to a Qubes bridge interface.
+# Usage: harden-bridge <bridge>
+#
+# Safe to call multiple times; nftables table creation is idempotent.
+
+BRIDGE="${1:?Usage: harden-bridge <bridge>}"
+[[ -d "/sys/class/net/$BRIDGE/bridge" ]] || exit 0
+
+# Disable bridge netfilter so bridged L2 traffic does not pass through the
+# host's ip/ip6tables chains (prevents masquerade from rewriting source IPs).
+# Load the module first so the sysctl path exists before we write to it.
+modprobe br_netfilter 2>/dev/null || true
+echo 0 > /proc/sys/net/bridge/bridge-nf-call-iptables
+echo 0 > /proc/sys/net/bridge/bridge-nf-call-ip6tables
+echo 0 > /proc/sys/net/bridge/bridge-nf-call-arptables
+
+# STP off: no physical loops; prevents BPDUs from VMs disrupting topology.
+ip link set "$BRIDGE" type bridge stp_state 0
+
+# Shorten FDB aging to narrow the window for stale MAC entries.
+ip link set "$BRIDGE" type bridge ageing_time 3000  # 30 s (units: centiseconds)
+
+# Disable IGMP/MLD snooping -- isolation bridges carry no multicast routing.
+ip link set "$BRIDGE" type bridge mcast_snooping 0
+
+# No proxy ARP, no ICMP redirects on the bridge IP interface.
+for _key in proxy_arp accept_redirects send_redirects; do
+    echo 0 > "/proc/sys/net/ipv4/conf/$BRIDGE/$_key" 2>/dev/null || true
+done
+
+# Bridge-family table: filter L2/L3 traffic arriving on VM vif ports.
+# Idempotent: skip creation if the table already exists.
+if ! nft list table bridge qubes-isolation >/dev/null 2>&1; then
+    nft -f - << 'EOF'
+table bridge qubes-isolation {
+    chain prerouting {
+        type filter hook prerouting priority -300; policy accept;
+        iifname "vif*" goto vif-in
+    }
+
+    chain vif-in {
+        # Drop IEEE 802.1D reserved multicast range (STP/RSTP/MSTP, 802.1X,
+        # LACP, LLDP, ...). Bit-mask: 01:80:C2:00:00:00-0F.
+        ether daddr & ff:ff:ff:ff:ff:f0 == 01:80:c2:00:00:00 drop
+
+        # Drop IPv6 RA (134) and RS (133) -- VMs must not claim to be gateways.
+        ip6 nexthdr icmpv6 icmpv6 type { 133, 134 } drop
+
+        # Rate-limit ARP per ingress port to suppress flooding and bound
+        # the rate at which a compromised VM can poison neighbour caches.
+        ether type arp \
+            meter arp-ratelimit { iifname limit rate 20/second burst 40 packets } \
+            accept
+        ether type arp drop
+
+        # Rate-limit DHCP (UDP dport 67) per port.
+        # No DHCP server on isolation bridges; prevents starvation floods.
+        ip protocol udp udp dport 67 \
+            meter dhcp-ratelimit { iifname limit rate 5/second burst 10 packets } \
+            accept
+        ip protocol udp udp dport 67 drop
+    }
+}
+EOF
+fi
+
+# Inet-family table: block L3 routing between bridge interfaces.
+# If ip_forward is enabled, this prevents traffic leaking from one bridge
+# (e.g., br-dev) to another (e.g., br-prod) via the host routing table.
+if ! nft list table inet qubes-bridge-forward >/dev/null 2>&1; then
+    nft -f - << 'EOF'
+table inet qubes-bridge-forward {
+    chain forward {
+        type filter hook forward priority filter - 1; policy accept;
+        # Drop any routed traffic where both ingress and egress are bridges.
+        iifname "br-*" oifname "br-*" drop
+    }
+}
+EOF
+fi

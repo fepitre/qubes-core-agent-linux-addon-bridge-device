@@ -1,0 +1,7 @@
+vm:
+  rpm:
+    build:
+    - rpm_spec/qubes-core-agent-linux-bridge-device.spec
+  deb:
+    build:
+    - debian

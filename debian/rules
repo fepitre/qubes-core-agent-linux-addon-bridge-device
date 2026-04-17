@@ -1,8 +1,4 @@
 #!/usr/bin/make -f
-# -*- makefile -*-
-
-# Uncomment this to turn on verbose mode.
-#export DH_VERBOSE=1
 
 DPKG_EXPORT_BUILDFLAGS = 1
 include /usr/share/dpkg/default.mk
@@ -13,7 +9,7 @@ export DESTDIR=$(shell readlink -m .)/debian/tmp
 	dh $@
 
 override_dh_auto_install:
-	make install-deb
+	make install-deb DESTDIR=$(DESTDIR)
 
 override_dh_install:
 	dh_install --fail-missing

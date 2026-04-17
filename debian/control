@@ -2,21 +2,33 @@ Source: qubes-core-agent-linux-addon-bridge-device
 Section: admin
 Priority: optional
 Maintainer: Frédéric Pierret <frederic.pierret@qubes-os.org>
+Rules-Requires-Root: no
 Standards-Version: 3.9.8
 Homepage: https://www.qubes-os.org/
-Build-Depends: debhelper (>= 9~), quilt
+Build-Depends: debhelper (>= 9~), make
 
 Package: qubes-core-agent-bridge-device
 Architecture: any
-Depends: bridge-utils
-Description: qubes-core-agent-linux extension for handling Bridge Device
-
-Package: qubes-core-agent-bridge-device-networking
-Architecture: any
-Depends: qubes-core-agent-bridge-device
-Description: qubes-core-agent-linux extension for handling Bridge Device with 'ifupdown'
+Depends: qubes-core-agent, bridge-utils
+Description: Qubes agent extension for publishing bridge network devices
+ Installs the publish-bridge script so that bridge interfaces present in
+ a backend qube are advertised to dom0/adminvm via QubesDB
+ (/qubes-bridge-devices/*).  Any qube can then attach one of these bridges
+ to another qube via the standard Admin API (admin.vm.device.bridge.*).
 
 Package: qubes-core-agent-bridge-device-network-manager
 Architecture: any
-Depends: qubes-core-agent-bridge-device, network-manager
-Description: qubes-core-agent-linux extension for handling Bridge Device with 'NetworkManager'
+Depends: qubes-core-agent-bridge-device (= ${binary:Version}), network-manager
+Description: Bridge device publishing hooks for NetworkManager
+ NetworkManager dispatcher hook installed in no-wait.d/ so that bridge
+ interfaces managed by NM are published to QubesDB on activation (up),
+ removed on deactivation (pre-down), and kept current as ports are
+ enslaved or released (slave-up / slave-down).
+
+Package: qubes-core-agent-bridge-device-systemd
+Architecture: any
+Depends: qubes-core-agent-bridge-device (= ${binary:Version}), systemd
+Description: Bridge device publishing service for systemd
+ A systemd one-shot service (qubes-publish-bridges.service) that publishes
+ all bridge interfaces present at boot time to QubesDB.  Useful for bridges
+ configured statically that are not activated through NetworkManager.

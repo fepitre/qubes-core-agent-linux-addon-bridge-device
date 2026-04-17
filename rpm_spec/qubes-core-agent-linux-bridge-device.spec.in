@@ -1,39 +1,86 @@
-Name:		qubes-core-agent-bridge-device
-Version:	@VERSION@
-Release:	1%{?dist}
-Summary:	qubes-core-agent-linux extension for handling Bridge Device
+Name:           qubes-core-agent-bridge-device
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        Qubes agent extension for publishing bridge network devices
 
-Group:		Qubes
-License:	GPLv2+
-URL:		https://www.qubes-os.org
-Source0:    %{name}-%{version}.tar.gz
+Group:          Qubes
+License:        GPLv2+
+URL:            https://www.qubes-os.org
+Source0:        %{name}-%{version}.tar.gz
 
-BuildRequires: make
-Requires: bridge-utils
+BuildArch:      noarch
+BuildRequires:  make
+BuildRequires:  systemd-rpm-macros
+
+Requires:       qubes-core-agent
+Requires:       qubes-db
+Requires:       bridge-utils
 
 %description
-qubes-core-agent-linux extension for handling Bridge Device
+Agent-side extension for the Qubes bridge device addon.  Installs the
+publish-bridge script so that bridge interfaces in a backend qube are
+advertised to dom0/adminvm via QubesDB (/qubes-bridge-devices/*).
+
+Any qube can then attach one of these bridges to another qube using the
+standard Admin API (admin.vm.device.bridge.*).
+
 
 %package network-manager
-Summary: qubes-core-agent-linux extension for handling Bridge Device with 'NetworkManager'
-Requires: qubes-core-agent-bridge-device
-Requires: NetworkManager
+Summary:        Bridge device publishing hooks for NetworkManager
+Requires:       %{name} = %{version}-%{release}
+Requires:       NetworkManager
 
 %description network-manager
-qubes-core-agent-linux extension for handling Bridge Device with 'NetworkManager'
+NetworkManager dispatcher hook installed in no-wait.d/ so that bridge
+interfaces managed by NM are published to QubesDB on activation (up),
+removed on deactivation (pre-down), and kept current when ports are
+enslaved or released (slave-up / slave-down).
+
+
+%package systemd
+Summary:        Bridge device publishing service for systemd
+Requires:       %{name} = %{version}-%{release}
+%{?systemd_requires}
+
+%description systemd
+A systemd one-shot service (qubes-publish-bridges.service) that publishes
+all bridge interfaces present at boot time to QubesDB.  Install alongside
+the network-manager sub-package so that statically-configured bridges are
+also published even if NetworkManager did not activate them.
+
 
 %prep
 %setup -q
 
+
+%build
+# nothing to compile
+
+
 %install
-make install-rh DESTDIR=$RPM_BUILD_ROOT
+make install-vm DESTDIR=$RPM_BUILD_ROOT UNITDIR=%{_unitdir}
+
+
+%post systemd
+%systemd_post qubes-publish-bridges.service
+
+%preun systemd
+%systemd_preun qubes-publish-bridges.service
+
+%postun systemd
+%systemd_postun_with_restart qubes-publish-bridges.service
+
 
 %files
 /usr/lib/qubes/publish-bridge
+/usr/lib/qubes/harden-bridge
 
 %files network-manager
-/etc/NetworkManager/dispatcher.d/pre-up.d/publish-bridge
-/etc/NetworkManager/dispatcher.d/pre-down.d/publish-bridge
+/etc/NetworkManager/dispatcher.d/no-wait.d/qubes-bridge
+
+%files systemd
+%{_unitdir}/qubes-publish-bridges.service
+
 
 %changelog
 @CHANGELOG@

@@ -1,2 +1,0 @@
-etc/network/if-up.d/publish-bridge
-etc/network/if-down.d/publish-bridge

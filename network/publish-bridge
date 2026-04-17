@@ -1,28 +1,64 @@
 #!/bin/bash
+# NetworkManager dispatcher: publish bridge interfaces to QubesDB.
+#
+# Installed as:
+#   /etc/NetworkManager/dispatcher.d/no-wait.d/qubes-bridge -> publish-bridge
+#
+# Also invoked with --all by qubes-publish-bridges.service at boot to
+# publish every bridge already present in the system.
 
-# NetworkManager defines 'IF' and 'STATUS'
-if [ -z "$IFACE" ] && [ -n "$1" ]; then
-    IFACE="$1"
+command -v qubesdb-write >/dev/null 2>&1 || exit 0
+command -v qubesdb-rm   >/dev/null 2>&1 || exit 0
+
+HARDEN=/usr/lib/qubes/harden-bridge
+
+_publish() {
+    local bridge="$1"
+
+    # Only act on real bridge interfaces.
+    [[ -d "/sys/class/net/$bridge/bridge" ]] || return 0
+
+    local ports=()
+    for port in /sys/class/net/"$bridge"/brif/*; do
+        [[ -e "$port" ]] || break
+        ports+=("$(basename "$port")")
+    done
+
+    local desc="$bridge (bridge_ports: ${ports[*]})"
+    # Remove stale entry first so watchers always see a clean write.
+    qubesdb-rm  "/qubes-bridge-devices/$bridge/" 2>/dev/null || true
+    qubesdb-write "/qubes-bridge-devices/$bridge/desc" "$desc" || true
+}
+
+_unpublish() {
+    local bridge="$1"
+    qubesdb-rm "/qubes-bridge-devices/$bridge/" 2>/dev/null || true
+}
+
+if [[ "$1" == "--all" ]]; then
+    for sysfs_bridge in /sys/class/net/*/bridge; do
+        [[ -d "$sysfs_bridge" ]] || continue
+        br="$(basename "$(dirname "$sysfs_bridge")")"
+        [[ -x "$HARDEN" ]] && "$HARDEN" "$br"
+        _publish "$br"
+    done
+    exit 0
 fi
 
-if [ -z "$MODE" ] && [ -n "$2" ]; then
-    MODE="$2"
-fi
+# DEVICE_IFACE is exported by NM and is authoritative; fall back to $1.
+IFACE="${DEVICE_IFACE:-$1}"
+ACTION="$2"
 
-if [ "$MODE" == "start" ] || [ "$MODE" == "pre-up" ]; then
-# Publish bridge name interface into qubesdb in order to inform @adminvm
-# of bridges availables in the current VM
-    if [ -e "/sys/class/net/$IFACE/bridge" ]; then
-        iface_bridge=()
-        for iface in /sys/class/net/"$IFACE"/brif/*
-        do
-            [[ -e "$iface" ]] || break
-            iface_bridge+=("$(basename "$iface")")
-        done
-        desc="$IFACE (bridge_ports: $iface_bridge)"
-        qubesdb-rm "/qubes-bridge-devices/$IFACE/"
-        qubesdb-write "/qubes-bridge-devices/$IFACE/desc" "$desc"
-    fi
-elif [ "$MODE" == "stop" ] || [ "$MODE" == "pre-down" ]; then
-    qubesdb-rm "/qubes-bridge-devices/$IFACE/"
-fi
+case "$ACTION" in
+    up)
+        [[ -x "$HARDEN" ]] && "$HARDEN" "$IFACE"
+        _publish "$IFACE"
+        ;;
+    pre-down)
+        _unpublish "$IFACE"
+        ;;
+    slave-up|slave-down)
+        # MASTER_IFACE is set by NM for slave-* events.
+        [[ -n "$MASTER_IFACE" ]] && _publish "$MASTER_IFACE"
+        ;;
+esac

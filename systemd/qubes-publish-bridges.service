@@ -1,0 +1,13 @@
+[Unit]
+Description=Publish bridge interfaces to QubesDB
+# Run after NM has activated connections so bridge ports are already enumerated.
+After=NetworkManager.service qubes-qrexec-agent.service
+Wants=qubes-qrexec-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/usr/lib/qubes/publish-bridge --all
+
+[Install]
+WantedBy=multi-user.target
