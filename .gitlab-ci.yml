@@ -22,8 +22,8 @@ shellcheck:
     TESTBED_REPO: https://github.com/fepitre/qubes-bridge-device-tests.git
     TESTBED_DIR: /tmp/bridge-device-tests
     ADMIN_SRC: /tmp/bridge-device-admin
-    ADMIN_REPO_URL: ""
-    ADMIN_BRANCH: ""
+    ADMIN_REPO_URL: "https://github.com/fepitre/qubes-core-admin-addon-bridge-device.git"
+    ADMIN_BRANCH: "devel20260416"
   before_script:
     - sudo qubes-dom0-update -y ansible qubes-ansible-dom0
     - sudo qvm-run --pass-io -u root "$(qvm-prefs default-mgmt-dvm template)" "dnf install -y qubes-ansible qubes-ansible-vm"
